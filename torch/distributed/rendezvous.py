@@ -9,15 +9,16 @@ import numbers
 import os
 import sys
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Callable, Iterator, Tuple
 
 from torch.distributed import FileStore, PrefixStore, Store, TCPStore
 
 from .constants import default_pg_timeout
 
 
-_rendezvous_handlers = {}
+_rendezvous_handlers: Dict[str, Callable[..., Iterator[Tuple[Store, int, int]]]] = {}
 
+__all__ = ["register_rendezvous_handler", "rendezvous"]
 
 def register_rendezvous_handler(scheme, handler):
     """

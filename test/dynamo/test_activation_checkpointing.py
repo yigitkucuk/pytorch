@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import functools
-import unittest
+import math
+import unittest  # noqa: F811
 from importlib import import_module
 
 import torch
@@ -8,7 +9,9 @@ import torch._dynamo.config
 
 import torch._dynamo.test_case
 import torch._functorch.config
+import torch.distributed as dist
 import torch.utils.checkpoint
+
 from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -18,7 +21,17 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import _pt2_selective_checkpoint_context_fn_gen, checkpoint
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_distributed = functools.partial(
+    unittest.skipIf, not dist.is_available(), "requires distributed"
+)
+
+
+def checkpoint_wrapper(fn):
+    def inner(*args):
+        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
+
+    return inner
 
 
 def count_ops(
@@ -32,12 +45,13 @@ def count_ops(
                 return node.args[1] == op
         return False
 
-    assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
-    if op:
+    # assert ((freq or freq_ge) and op) or ((freqs or freqs_ge) and ops)
+    if op is not None:
+        assert not isinstance(op, list)
         ops = [op]
-    if freq:
+    if freq is not None:
         freqs = [freq]
-    if freq_ge:
+    if freq_ge is not None:
         freqs_ge = [freq_ge]
     if freqs:
         for op, freq in zip(ops, freqs):
@@ -45,9 +59,8 @@ def count_ops(
             for node in gm.graph.nodes:
                 if match_rng_op(node, op) or node.target == op:
                     actual_count += 1
-            assert (
-                actual_count == freq
-            ), f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            err_msg = f"In graph {gm}, expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
     else:
         assert freqs_ge is not None
         for op, freq_ge in zip(ops, freqs_ge):
@@ -172,7 +185,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 msg="Gradient mismatch between the original version and the checkpointed version of the same function",
             )
 
-    @requires_cuda()
+    @requires_cuda
     def test_tags_function(self):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -192,7 +205,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     def test_tags_function_via_global_checkpoint(self):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -211,7 +224,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     def test_tags_function_with_kwargs(self):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -231,7 +244,32 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
+    def test_tags_sequential_layers(self):
+        def gn(x):
+            x = x.cos()
+            for _ in range(3):
+                x = torch.mm(x, x)
+            x = x.cos()
+            return x
+
+        def fn(x):
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            x = torch.utils.checkpoint.checkpoint(gn, x)
+            return x
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=6, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops,
+            freqs=[2, 18],
+            ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x)
+
+    @requires_cuda
     def test_tags_multiple_checkpoints(self):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
@@ -253,7 +291,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     def test_tags_module(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -281,7 +319,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x)
 
-    @requires_cuda()
+    @requires_cuda
     def test_tags_decomps(self):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
@@ -316,7 +354,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-    @requires_cuda()
+    @requires_cuda
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_recomputed_rand(self):
         def gn(x, y):
@@ -340,7 +378,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self):
         def gn(x, y):
@@ -367,7 +405,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         backend = "inductor"
         self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self):
         # Figure out a way to test the number of inductor_random calls
@@ -390,7 +428,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
 
-    @requires_cuda()
+    @requires_cuda
     def test_fallback(self):
         def gn(x, y):
             torch._dynamo.graph_break()
@@ -418,7 +456,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
 
-    @requires_cuda()
+    @requires_cuda
     def test_kwargs(self):
         def gn(x, y, z=None):
             a = torch.matmul(x, y)
@@ -452,7 +490,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    @requires_cuda()
+    @requires_cuda
     def test_symints_location(self):
         def gn(x, y):
             return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
@@ -482,7 +520,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -532,7 +570,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -585,7 +623,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -653,7 +691,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -702,7 +740,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -750,7 +788,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @unittest.skip(
         "In-place op support in selective checkpointing + torch.compile "
@@ -804,7 +842,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
@@ -906,7 +944,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         ):
             self._validate(fn, backend, x, y)
 
-    @requires_cuda()
+    @requires_cuda
     @skipIfRocm
     def test_autocast_flash_attention(self):
         def fn(primals_1, primals_2, primals_3):
@@ -931,7 +969,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             res = opt_gn(*args)
             self.assertEqual(ref, res)
 
-    @requires_cuda()
+    @requires_cuda
     def test_error_msg(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -951,12 +989,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4, 4).cuda()
         opt_fn = torch.compile(fn, fullgraph=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            "while introspecting torch.utils.checkpoint.checkpoint, we were unable to trace function `NNModuleVariable`",
+            torch._dynamo.exc.Unsupported, "skip function graph_break in file"
         ):
             opt_fn(x)
 
-    @requires_cuda()
+    @requires_cuda
     def test_list_inputs(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
@@ -980,6 +1017,122 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x, [y, z])
         self.assertEqual(ref, res)
+
+    @requires_cuda
+    def test_pattern_matcher(self):
+        # Check that the sdpa op is recomputed in the backward graph
+        # tests percolate_tags
+
+        @checkpoint_wrapper
+        def dot_prod_attention(
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                torch.matmul(query, key.transpose(-2, -1))
+                .mul(1.0 / math.sqrt(key.shape[-1]))
+                .softmax(dim=-1)
+                .matmul(value)
+            )
+
+        def fn(query, key, value):
+            # Checks that sin is not recomputed in the backward graph
+            return dot_prod_attention(query.sin(), key, value)
+
+        tensor_shape = (4, 2, 16, 32)
+        dtype = torch.float16
+        args1 = [
+            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
+            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
+            torch.randn(tensor_shape, device="cuda", dtype=dtype, requires_grad=True),
+        ]
+
+        # Save the AOT graphs
+        aot_graphs = []
+        from torch._inductor import compile_fx
+
+        def debug_compile_fx_inner(graph, example_inputs, *args, **kwargs):
+            aot_graphs.append(graph)
+            return compile_fx.compile_fx_inner(graph, example_inputs, *args, **kwargs)
+
+        backend = functools.partial(
+            compile_fx.compile_fx, inner_compile=debug_compile_fx_inner
+        )
+
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        opt_fn(*args1).sum().backward()
+
+        fwd_graph = aot_graphs[0]
+        self.assertTrue(
+            count_ops(
+                fwd_graph,
+                [],
+                freq=1,
+                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
+            )
+        )
+
+        bwd_graph = aot_graphs[1]
+        # Check that sin is not recomputed in the backward graph - checks percolate tags
+        self.assertTrue(count_ops(bwd_graph, [], freq=0, op=torch.ops.aten.sin.default))
+        # Check that the sdpa op is recomputed in the backward graph
+        self.assertTrue(
+            count_ops(
+                bwd_graph,
+                [],
+                freq=1,
+                op=torch.ops.aten._scaled_dot_product_flash_attention.default,
+            )
+        )
+
+    @requires_cuda
+    @requires_distributed()
+    def test_distributed_utils_checkpoint_wrapper(self):
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            checkpoint_wrapper as dist_checkpoint_wrapper,
+        )
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.c = 2
+
+            def forward(self, x):
+                x = torch.sin(x)
+                x = self.linear(x)
+                x = torch.cos(x)
+                return x * self.c
+
+        mod = dist_checkpoint_wrapper(MockModule())
+        x = torch.randn(4, 4)
+        ref = mod(x)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    @requires_cuda
+    @requires_distributed()
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
+    def test_dynamo_does_not_trace_getattr_as_top_frame(self):
+        # inline_inbuilt_nn_modules is a proxy to emulate what FSDP tests do.
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            CheckpointWrapper,
+        )
+
+        cnt = CompileCounterWithBackend("eager")
+
+        lin = torch.nn.Linear(1, 1)
+        mod = torch.nn.Sequential(lin, lin)
+        mod = CheckpointWrapper(mod)
+        mod._checkpoint_wrapped_module.a = torch.ones(1, 1)
+
+        def fn(x):
+            return mod(x) * mod.a
+
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(1, 1)
+
+        self.assertEqual(opt_fn(x), fn(x))
 
 
 if __name__ == "__main__":

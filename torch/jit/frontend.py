@@ -365,7 +365,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace and not isinstance(fn, _ParsedDef):
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):  # type: ignore[truthy-function]
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
@@ -1072,7 +1072,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
-                elif sub_type is ast.Ellipsis:
+                elif sub_type is ast.Constant and expr.value is Ellipsis:
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(
@@ -1206,8 +1206,8 @@ class ExprBuilder(Builder):
                     raise NotSupportedError(r, "Don't support formatting in JoinedStr")
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
-            elif isinstance(value, ast.Str):
-                s += value.s
+            elif isinstance(value, ast.Constant):
+                s += value.value
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")
 

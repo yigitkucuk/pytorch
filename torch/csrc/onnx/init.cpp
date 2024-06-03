@@ -274,7 +274,11 @@ void initONNXBindings(PyObject* module) {
       .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128)
       .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16)
       .value("FLOAT8E4M3FN", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN)
-      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2);
+      .value(
+          "FLOAT8E4M3FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FNUZ)
+      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2)
+      .value(
+          "FLOAT8E5M2FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
       .value("ONNX", OperatorExportTypes::ONNX)
@@ -289,10 +293,6 @@ void initONNXBindings(PyObject* module) {
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 
-#ifdef BUILD_CAFFE2
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = true;
-#else
   onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
-#endif
 }
 } // namespace torch::onnx
