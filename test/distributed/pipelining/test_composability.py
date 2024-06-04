@@ -145,7 +145,6 @@ class ComposabilityTest(MultiProcContinousTest):
             offsets = [offset]
             pipeline_schedule = ScheduleClass(
                 pipeline_stage,
-                n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
         else:
@@ -160,7 +159,6 @@ class ComposabilityTest(MultiProcContinousTest):
                 partial_models = [pipeline_stage.submod for pipeline_stage in stages]
             pipeline_schedule = ScheduleClass(
                 stages,
-                n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
 

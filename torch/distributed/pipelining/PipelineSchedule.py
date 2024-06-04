@@ -250,10 +250,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
     def __init__(
         self,
         stage: _PipelineStageBase,
-        n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
+        n_microbatches = stage.num_microbatches
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
@@ -524,7 +524,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
     def __init__(
         self,
         stages: List[_PipelineStageBase],
-        n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
@@ -532,6 +531,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             raise ValueError(
                 f"Multi-stage schedule expects at least two stages but got {len(stages)}"
             )
+        n_microbatches = stages[0].num_microbatches
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
@@ -658,11 +658,11 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
     def __init__(
         self,
         stages: List[_PipelineStageBase],
-        n_microbatches: int,
         loss_fn: Optional[Callable] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
         self.pp_group_size = stages[0].group_size
+        n_microbatches = stages[0].num_microbatches
         # TODO: is this limitation a must?
         if n_microbatches % self.pp_group_size != 0:
             raise ValueError(
@@ -673,7 +673,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
         super().__init__(
             stages=stages,
-            n_microbatches=n_microbatches,
             loss_fn=loss_fn,
             output_merge_spec=output_merge_spec,
         )
