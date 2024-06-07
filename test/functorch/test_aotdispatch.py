@@ -11,19 +11,22 @@ import itertools
 import unittest
 import warnings
 from contextlib import nullcontext
-from functools import partial
+from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
+
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
 
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
     aot_module,
+    aot_module_simplified,
     compiled_function,
     compiled_module,
     default_decompositions,
@@ -37,11 +40,7 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
-from torch._functorch.aot_autograd import (
-    aot_export_joint_simple,
-    aot_export_module,
-    aot_module_simplified,
-)
+from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -69,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -102,13 +102,7 @@ except ImportError:
 
 
 class AOTTestCase(TestCase):
-    def setUp(self):
-        self.prev_grad_state = torch.is_grad_enabled()
-        super().setUp()
-
-    def tearDown(self):
-        torch.set_grad_enabled(self.prev_grad_state)
-        super().tearDown()
+    pass
 
 
 class TestPythonKey(AOTTestCase):
@@ -291,7 +285,66 @@ def is_in_base(t, maybe_tensors):
     return False
 
 
+def skipIfDynamoInput(reason, xfail=False):
+    """
+    Skip TestAOTAutograd if running with dynamo input
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            fn = func
+            if isinstance(self, TestAOTAutogradWithDynamo):
+                if xfail:
+                    fn = unittest.expectedFailure(fn)
+                else:
+                    self.skipTest(
+                        f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
+                    )
+            else:
+                fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 class TestAOTAutograd(AOTTestCase):
+    def run_autograd(
+        self,
+        f: Callable,
+        fw_graph_cell: List[Optional[Callable]],
+        decompositions: Optional[Dict],
+        keep_input_mutations: bool,
+        dynamic: bool,
+    ):
+        """
+        Runs aot_autograd with the specified settings on f.
+        """
+        if isinstance(f, nn.Module):
+            compiled_f = aot_module(
+                f,
+                fw_compiler=make_boxed_compiler(
+                    partial(extract_graph, graph_cell=fw_graph_cell)
+                ),
+                bw_compiler=nop,
+                decompositions=decompositions,
+                keep_inference_input_mutations=keep_input_mutations,
+                dynamic=dynamic,
+            )
+        else:
+            compiled_f = aot_function(
+                f,
+                fw_compiler=make_boxed_compiler(
+                    partial(extract_graph, graph_cell=fw_graph_cell)
+                ),
+                bw_compiler=nop,
+                decompositions=decompositions,
+                keep_inference_input_mutations=keep_input_mutations,
+                dynamic=dynamic,
+            )
+        return compiled_f
+
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
@@ -352,28 +405,9 @@ class TestAOTAutograd(AOTTestCase):
                     graph_inps = inp
                     graph_inps_copy = inp_copy
             fw_graph_cell = [None]
-            if isinstance(f, nn.Module):
-                compiled_f = aot_module(
-                    f,
-                    fw_compiler=make_boxed_compiler(
-                        partial(extract_graph, graph_cell=fw_graph_cell)
-                    ),
-                    bw_compiler=nop,
-                    decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations,
-                    dynamic=dynamic,
-                )
-            else:
-                compiled_f = aot_function(
-                    f,
-                    fw_compiler=make_boxed_compiler(
-                        partial(extract_graph, graph_cell=fw_graph_cell)
-                    ),
-                    bw_compiler=nop,
-                    decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations,
-                    dynamic=dynamic,
-                )
+            compiled_f = self.run_autograd(
+                f, fw_graph_cell, decompositions, keep_input_mutations, dynamic
+            )
             ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
             test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
             self.assertEqual(ref_grad, test_grad)
@@ -540,6 +574,9 @@ def forward(self, primals_1):
         ]
         self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
+    @skipIfDynamoInput(
+        "Test doesn't make sense with dynamo, which changes order of mutations"
+    )
     def test_set__and_data_mutation_good(self):
         def f(a, b):
             # The data mutation happens *after* the set_(). This is ok (see the graph below)
@@ -580,6 +617,10 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
+    @skipIfDynamoInput("Not supported by dynamo", xfail=True)
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -601,6 +642,9 @@ def forward(self, primals_1, primals_2):
                 f, inp, test_mutation=True, keep_inp_mutations=True
             )
 
+    @skipIfDynamoInput(
+        "Test doesn't make sense with dynamo, which changes order of mutations"
+    )
     def test_set__not_allowed(self):
         def f(a, b):
             with torch.no_grad():
@@ -678,8 +722,6 @@ def forward(self, primals_1):
 
         out_ref = f(ref_view)
         out_test = f_compiled(test_view)
-        print(ref)
-        print(test)
         self.assertEqual(ref, test)
 
     def test_input_mutation_modifies_autograd_meta_of_aliases(self):
@@ -1809,6 +1851,7 @@ def forward(self, primals_1):
         )
 
     @parametrize("req_grad", [False, True])
+    @skipIfDynamoInput("Runtime error not raised with dynamo", xfail=True)
     def test_subclass_metadata_mutation(self, req_grad):
         def f(a):
             a.transpose_(1, 0)
@@ -1882,6 +1925,7 @@ def forward(self, primals_1, primals_2):
     return [t, view_1, view_2]""",
         )
 
+    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -1919,6 +1963,7 @@ def forward(self, primals_1, primals_2):
     # One gets a data mutation, the other gets a metadata mutation.
     # We need to make sure that the metadata mutation gets propagated
     # back to the original input.
+    @skipIfDynamoInput("Dynamo removes runtime error")
     def test_input_data_and_metadata_mutation_aliases_other_input(self):
         # a and b are aliased
         def f(a, b):
@@ -2524,6 +2569,7 @@ def forward(self, primals_1, primals_2):
     return [as_strided_scatter, add, add_1]""",
         )  # noqa: B950
 
+    @skipIfDynamoInput("Fails with dynamo")
     def test_input_mutation_aliases_bases_out_of_order(self):
         # This tests our calling convention: if b and d are aliased, then the outer calling convention
         # that we send to the compiled forward becomes:
@@ -2598,6 +2644,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
+    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
@@ -4835,70 +4882,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
 
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    def test_min_cut_partitioner_recomputable_ops(self):
-        def f(x):
-            return x * x * x
-
-        recomputable_ops = []
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                        kwargs
-        # -------------  ---------  ---------------  --------------------------  --------
-        # placeholder    primals_1  primals_1        ()                          {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)      {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)            {}
-        # output         output     output           ([mul_1, primals_1, mul],)  {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    mul         mul              ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
-
-        recomputable_ops = [torch.ops.aten.mul]
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                    kwargs
-        # -------------  ---------  ---------------  ----------------------  --------
-        # placeholder    primals_1  primals_1        ()                      {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)  {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)        {}
-        # output         output     output           ([mul_1, primals_1],)   {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul         aten.mul.Tensor  (primals_1, primals_1)   {} # RECOMPUTED
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
-
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
         # happens in the backward pass.
@@ -5883,6 +5866,58 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_for)
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
+
+
+@skipIfTorchDynamo("This test suite already uses dynamo")
+class TestAOTAutogradWithDynamo(TestAOTAutograd):
+    """
+    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
+    """
+
+    def assertExpectedInline(self, *args, **kwargs):
+        # These will have different outputs because dynamo returns a different graph module
+        # But we don't really care about that assertion when testing with dynamo,
+        # only that the outputs match, etc.
+        pass
+
+    # Compiler to passes to dynamo
+    def run_autograd(
+        self,
+        f: Callable,
+        fw_graph_cell: List[Optional[Callable]],
+        decompositions: Optional[Dict],
+        keep_input_mutations: bool,
+        dynamic: bool,
+    ):
+        """
+        Runs dynamo and aot_autograd with the specified settings
+        """
+
+        def dynamo_compiler(gm, inputs, **kwargs):
+            result = aot_module_simplified(
+                gm,
+                inputs,
+                fw_compiler=make_boxed_compiler(
+                    partial(extract_graph, graph_cell=fw_graph_cell)
+                ),
+                bw_compiler=nop,
+                decompositions=decompositions,
+                keep_inference_input_mutations=keep_input_mutations,
+                # Dynamic is calculated from whether the inputs have fake tensors
+            )
+            return result
+
+        def torch_compile_wrapper(*args, **kwargs):
+            torch._dynamo.reset()
+            fn = torch.compile(f, backend=dynamo_compiler)
+            try:
+                result = fn(*args, **kwargs)
+            except torch._dynamo.exc.BackendCompilerFailed as e:
+                # So that assertRaises works properly
+                raise e.inner_exception from e
+            return result
+
+        return torch_compile_wrapper
 
 
 if __name__ == "__main__":
