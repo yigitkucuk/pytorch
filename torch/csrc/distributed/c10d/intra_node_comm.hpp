@@ -10,6 +10,7 @@ namespace c10d::intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
+constexpr size_t kP2pStateSize = 512 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -97,6 +98,14 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   bool isInitialized_ = false;
   Topology topology_ = Topology::UNKNOWN;
+
+  size_t p2pStateAllocSize_ = 0;
+  size_t bufferAllocSize_ = 0;
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  CUmemGenericAllocationHandle p2pStateHandle_{};
+  CUmemGenericAllocationHandle bufferHandle_{};
+#endif
+
   std::array<void*, kMaxDevices> p2pStates_{};
   std::array<void*, kMaxDevices> buffers_{};
   void* p2pStatesDev_{};
