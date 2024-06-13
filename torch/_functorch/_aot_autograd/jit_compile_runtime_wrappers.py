@@ -276,6 +276,7 @@ def aot_dispatch_autograd(
                 aot_config.aot_id,
                 include_stride=True,
                 include_device=True,
+                colored=True,
             ),
         )
         trace_structured(
@@ -426,6 +427,7 @@ def aot_dispatch_autograd(
                     aot_config.aot_id,
                     include_stride=True,
                     include_device=True,
+                    colored=True,
                 ),
             )
             aot_graphs_log.info(
@@ -436,6 +438,7 @@ def aot_dispatch_autograd(
                     aot_config.aot_id,
                     include_stride=True,
                     include_device=True,
+                    colored=True,
                 ),
             )
             trace_structured(
