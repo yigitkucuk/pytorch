@@ -860,6 +860,9 @@ class cuda:
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
 cpu_backend = "cpp"
 
+# Backend to use for CUDA codegen either "triton" or "halide" (experimental)
+cuda_backend = "triton"
+
 
 class halide:
     # Base halide target to use for CPU devices
@@ -878,6 +881,10 @@ class halide:
 
     # Controls `debug` flag passed to Halide target
     debug = False
+
+    # Enable (or fallback on) scan kernels such as cumsum
+    # Halide autoschedulers struggle with these kernels
+    scan_kernels = False
 
 
 # create a directory containing lots of debug information
