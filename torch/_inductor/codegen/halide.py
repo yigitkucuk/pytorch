@@ -202,6 +202,7 @@ pexpr = PythonPrinter().doprint
 
 _halide_type = {
     torch.bool: "hl.Bool()",
+    torch.bfloat16: "hl.BFloat(16)",
     torch.float16: "hl.Float(16)",
     torch.float32: "hl.Float(32)",
     torch.float64: "hl.Float(64)",
@@ -217,8 +218,6 @@ _halide_type = {
 
 
 def halide_type(dtype):
-    if dtype == torch.bfloat16:
-        raise Unsupported("torch.bfloat16")
     return _halide_type[dtype]
 
 
@@ -436,11 +435,13 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def isinf(x):
-        return f"hl.is_inf({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_inf(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def isnan(x):
-        return f"hl.is_nan({x})"
+        # workaround https://github.com/halide/Halide/issues/8309
+        return f"hl.is_nan(hl.cast(hl.Float(32), {x}))"
 
     @staticmethod
     def round(x):
