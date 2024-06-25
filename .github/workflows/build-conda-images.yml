@@ -50,3 +50,6 @@ jobs:
         run: |
           if [[ "${{ env.WITH_PUSH }}" == "true" ]]; then
             .ci/docker/build_docker_conda.sh
+          else
+            .ci/docker/build_docker_conda.sh --no-push ${{ steps.calculate-docker-image.outputs.docker-image-id }}
+          fi
