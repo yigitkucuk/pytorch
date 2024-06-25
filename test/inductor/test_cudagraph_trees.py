@@ -1952,7 +1952,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             FileCheck().check(
                 "skipping cudagraph due to function 0 exceeding max re-recording limit (=0)"
-                "on cudagraph node None due to static input tensor address changes."
+                " on cudagraph node None due to static input tensor address changes."
             ).check(
                 "skipping cudagraph due to function 1 exceeding max re-recording limit (=0)"
                 " on cudagraph node None due to static input tensor address changes."
