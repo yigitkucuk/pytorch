@@ -48,15 +48,7 @@ jobs:
           role-session-name: gha-linux-build
           role-duration-seconds: 10800
           aws-region: us-east-1
-      - name: Build Docker Image
-        run: |
-          if [[ "${{ env.WITH_PUSH }}" == "true" ]]; then
-            .ci/docker/build_docker_conda.sh
-          else
-            .ci/docker/build_docker_conda.sh --no-push ${{ steps.calculate-docker-image.outputs.docker-image-id }}
-          fi
       - name: Calculate docker image
-        if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
