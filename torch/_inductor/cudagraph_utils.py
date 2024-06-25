@@ -180,15 +180,16 @@ def get_placeholder_stack_trace(placeholder: torch.fx.Node) -> Optional[str]:
 
     return None
 
+
 class CheckInvariantStatus(Enum):
     # Check invariant succeeded
     SUCCESS = 1
-    
+
     # Previously managed data pointers are not stable
     CudagraphManagedIdxMismatch = 2
-    
+
     # Static tensor input addresses are not stable
     StaticInputIdxMismatch = 3
-    
+
     # Expected dead indices before graph are live
     ExpectedDeadIndicesBeforeGraphMismatch = 4

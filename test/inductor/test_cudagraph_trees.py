@@ -1933,7 +1933,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0
+        )
         def test_fallback_to_eager_if_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
@@ -1949,9 +1951,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.run_static_input_param_test(fn, 3)
 
             FileCheck().check(
-                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0) on cudagraph node None due to static input tensor address changes."
+                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0)"
+                "on cudagraph node None due to static input tensor address changes."
             ).check(
-                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0) on cudagraph node None due to static input tensor address changes."
+                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0)"
+                " on cudagraph node None due to static input tensor address changes."
             ).run(
                 captured_output[0]
             )
@@ -1959,7 +1963,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0
+        )
         def test_fallback_to_eager_if_recompiling_too_many_times_warn_only_once(self):
             def fn_eager(x, y):
                 return x * y
@@ -1993,11 +1999,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
             FileCheck().check_count(
-                "skipping cudagraph due to function 0 exceeding max recording limit (=1) on cudagraph node None due to static input tensor address changes.",
+                "skipping cudagraph due to function 0 exceeding max re-recording limit (=0)"
+                " on cudagraph node None due to static input tensor address changes.",
                 1,
                 exactly=True,
             ).check_count(
-                "skipping cudagraph due to function 1 exceeding max recording limit (=1) on cudagraph node None due to static input tensor address changes.",
+                "skipping cudagraph due to function 1 exceeding max re-recording limit (=0)"
+                " on cudagraph node None due to static input tensor address changes.",
                 1,
                 exactly=True,
             ).run(
@@ -2007,7 +2015,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._dynamo.config.patch("error_on_recompile", True)
         @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
-        @torch._inductor.config.patch("triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 1)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 1
+        )
         def test_not_fallback_to_eager_if_have_not_recompiling_too_many_times(self):
             def fn(x, y):
                 return x * y
@@ -2036,10 +2046,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 foo(inp)
 
+        # By setting triton.cudagraph_support_input_mutation=True, we force re-record
+        # if static tensor addresses changed.
         @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
         def test_rerecord_if_static_input_address_changed(self):
-            # By setting triton.cudagraph_support_input_mutation=True, we force re-record
-            # if static tensor addresses changed.
             class Goo(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -2076,6 +2086,94 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
+
+        # By setting triton.cudagraph_support_input_mutation=True, we force re-record
+        # if static tensor addresses changed.
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 1
+        )
+        def test_unlimited_rerecord_due_to_integer_input_changes(self):
+            def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+                return x + y
+
+            foo_opt = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for y in range(20):
+                    inp = (torch.rand((2, 3), device="cuda"), y)
+                    for _ in range(3):
+                        opt_out = foo_opt(*inp)
+                        self.assertEqual(opt_out, foo(*inp))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertEqual(captured_output[0], "")
+            self.assertEqual(self.get_manager().new_graph_id().id, 20)
+
+        # By setting triton.cudagraph_support_input_mutation=True, we force re-record
+        # if static tensor addresses changed.
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 1
+        )
+        def test_unlimited_rerecord_due_to_static_if_branches(self):
+            def foo(x: torch.Tensor, y: int) -> torch.Tensor:
+                if y == 0:
+                    return x + y
+                elif y == 1:
+                    return x + y * 2
+                elif y == 3:
+                    return x + y * 3
+                else:
+                    return x + y * 4
+
+            foo_opt = torch.compile(foo, mode="reduce-overhead")
+
+            with capture_stderr() as captured_output:
+                for y in range(5):
+                    inp = (torch.rand((2, 3), device="cuda"), y)
+                    for _ in range(3):
+                        opt_out = foo_opt(*inp)
+                        self.assertEqual(opt_out, foo(*inp))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertEqual(captured_output[0], "")
+            self.assertEqual(self.get_manager().new_graph_id().id, 5)
+
+        # Unlimited rerecording due to Cudagraph Managed Idx mismatch
+        # By setting triton.cudagraph_support_input_mutation=True, we force re-record
+        # if static tensor addresses changed.
+        @torch._inductor.config.patch("triton.cudagraph_support_input_mutation", True)
+        @torch._inductor.config.patch(
+            "triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch", 0
+        )
+        def test_unlimited_rerecord_due_to_cudagraph_managed_tensor_address_mismatch(
+            self,
+        ):
+            def foo(x: torch.Tensor) -> torch.Tensor:
+                return x + 1
+
+            def goo(x: torch.Tensor) -> torch.Tensor:
+                return x + 2
+
+            foo = torch.compile(foo, mode="reduce-overhead")
+            goo = torch.compile(goo, mode="reduce-overhead")
+
+            inp = torch.rand((2, 3), device="cuda")
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                goo(foo(inp))
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    foo_out = foo(inp)
+                    # Change the cudagraph managed tensor address
+                    goo(foo_out + 1)
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            self.assertEqual(captured_output[0], "")
+            self.assertEqual(self.get_manager().new_graph_id().id, 3)
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 

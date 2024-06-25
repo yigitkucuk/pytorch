@@ -2000,8 +2000,8 @@ class CUDAGraphTreeManager:
                 ):
                     _id = curr_node_id.id if curr_node_id else None
                     log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraph due to function {function_id.id} exceeding max "
-                        f"re-recording limit (={torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch}) "
+                        f"skipping cudagraph due to function {function_id.id} exceeding max re-recording limit "
+                        f"(={torch._inductor.config.triton.cudagraph_max_rerecording_due_to_static_input_idx_mismatch}) "
                         f"on cudagraph node {_id} due to static input tensor address changes."
                     )
                     return self.ids_to_funcs[function_id].model(new_inputs)
