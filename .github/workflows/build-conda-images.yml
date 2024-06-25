@@ -55,3 +55,8 @@ jobs:
           else
             .ci/docker/build_docker_conda.sh --no-push ${{ steps.calculate-docker-image.outputs.docker-image-id }}
           fi
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image-name }}
