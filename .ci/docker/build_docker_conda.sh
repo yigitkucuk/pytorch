@@ -61,16 +61,17 @@ if [[ -n ${GITHUB_REF} ]]; then
     docker tag ${DOCKER_IMAGE} ${DOCKER_IMAGE_SHA_TAG}
 fi
 
-if [[ "${WITH_PUSH:-}" == true ]]; then
-  (
-    set -x
-    docker push "${DOCKER_IMAGE}"
-    if [[ -n ${GITHUB_REF} ]]; then
-        docker push "${DOCKER_IMAGE_BRANCH_TAG}"
-        docker push "${DOCKER_IMAGE_SHA_TAG}"
-    fi
-    if [[ "${DOCKER_TAG}" =~ ^cuda* ]]; then
-      docker push "pytorch/conda-builder:cuda${CUDA_VERSION/./}"
-    fi
-  )
-fi
+# temporary disable push for now. We don't want to accidentally push to repo
+#if [[ "${WITH_PUSH:-}" == true ]]; then
+#  (
+#    set -x
+#    docker push "${DOCKER_IMAGE}"
+#    if [[ -n ${GITHUB_REF} ]]; then
+#        docker push "${DOCKER_IMAGE_BRANCH_TAG}"
+#        docker push "${DOCKER_IMAGE_SHA_TAG}"
+#    fi
+#    if [[ "${DOCKER_TAG}" =~ ^cuda* ]]; then
+#      docker push "pytorch/conda-builder:cuda${CUDA_VERSION/./}"
+#    fi
+#  )
+#fi
