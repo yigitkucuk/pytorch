@@ -41,13 +41,13 @@ jobs:
         with:
           submodules: false
       - name: configure aws credentials
-      uses: aws-actions/configure-aws-credentials@v3
-      if: ${{ inputs.aws-role-to-assume != '' }}
-      with:
-        role-to-assume: ${{ inputs.aws-role-to-assume }}
-        role-session-name: gha-linux-build
-        role-duration-seconds: 10800
-        aws-region: us-east-1
+        uses: aws-actions/configure-aws-credentials@v3
+        if: ${{ inputs.aws-role-to-assume != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-session-name: gha-linux-build
+          role-duration-seconds: 10800
+          aws-region: us-east-1
       - name: Calculate docker image
         id: calculate-docker-image
         if: env.WITH_PUSH == 'false'
