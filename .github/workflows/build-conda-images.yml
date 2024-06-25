@@ -40,11 +40,17 @@ jobs:
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:
-      - name: Clone PyTorch
-        uses: actions/checkout@v3
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@move_docker_conda
         with:
-          path: pytorch
+          submodules: false
       - name: Calculate docker image
+        id: calculate-docker-image
+        if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-            docker-image-name: ${{ inputs.docker-image }}
+          docker-image-name: ${{ inputs.docker-image-name }}
+      - name: Build Docker Image
+        run: |
+          if [[ "${{ env.WITH_PUSH }}" == "true" ]]; then
+            .ci/docker/build_docker_conda.sh
