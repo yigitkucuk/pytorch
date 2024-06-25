@@ -48,7 +48,7 @@ jobs:
         if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image-name: ${{ inputs.docker-image }}
       - name: Build Docker Image
         run: |
           if [[ "${{ env.WITH_PUSH }}" == "true" ]]; then
