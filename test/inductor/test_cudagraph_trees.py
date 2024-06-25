@@ -1946,8 +1946,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 #       /                           \
                 # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
                 # (bwd w/ p1, Graph 1)
-                # All other graphs are skipped because we hit the max recording limit
-                # (=1 for each node and function pair)
+                # All other graphs are skipped because we hit the max re-recording limit
+                # (=0 for each node and function pair)
                 self.run_static_input_param_test(fn, 3)
 
             FileCheck().check(
@@ -1977,8 +1977,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     #       /                           \
                     # (fwd w/ p1, Graph 0)            (bwd w/p2, Graph2)
                     # (bwd w/ p1, Graph 1)
-                    # All other graphs are skipped because we hit the max recording limit
-                    # (=1 for each node and function pair)
+                    # All other graphs are skipped because we hit the max re-recording limit
+                    # (=0 for each node and function pair)
                     fn_compiled = torch.compile(fn_eager, mode="reduce-overhead")
 
                     p1 = torch.nn.Parameter(torch.rand([2, 2]))
