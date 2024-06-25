@@ -48,3 +48,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: ${{ inputs.docker-image }}
+      - name: Build Docker Image
+        run: |
+          .ci/docker/build_docker_conda.sh
