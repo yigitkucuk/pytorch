@@ -50,4 +50,4 @@ jobs:
             docker-image-name: ${{ inputs.docker-image }}
       - name: Build Docker Image
         run: |
-          .ci/docker/build_docker_conda.sh
+          pytorch/pytorch/.ci/docker/build_docker_conda.sh
