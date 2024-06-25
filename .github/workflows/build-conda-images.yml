@@ -45,11 +45,6 @@ jobs:
         with:
           path: pytorch
       - name: Calculate docker image
-        if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ${{ inputs.docker-image }}
-      - name: Build Docker Image
-        run: |
-          if [[ "${{ env.WITH_PUSH }}" == "true" ]]; then
-            .ci/docker/build_docker_conda.sh
+            docker-image-name: ${{ inputs.docker-image }}
