@@ -2,6 +2,10 @@ name: Build conda docker images
 
 on:
   workflow_dispatch:
+    inputs:
+        docker-image-name:
+          description: 'Name of the Docker image'
+          required: true 
   push:
     branches:
       - main
@@ -40,16 +44,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           path: pytorch
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        if: ${{ inputs.aws-role-to-assume != '' }}
-        with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-build
-          role-duration-seconds: 10800
-          aws-region: us-east-1
       - name: Calculate docker image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
-          working-directory: pytorch
+            docker-image-name: ${{ inputs.docker-image }}
