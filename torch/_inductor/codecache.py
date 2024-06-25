@@ -68,6 +68,7 @@ from torch._inductor.cpp_builder import (
     CppOptions,
     CppTorchCudaOptions,
     get_compiler_version_info,
+    get_name_and_dir_from_output_file_path,
 )
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, pick_vec_isa, VecISA
 from torch._inductor.runtime.compile_tasks import (
@@ -2058,9 +2059,7 @@ class CppCodeCache:
 
         _set_gpu_runtime_env()  # cpp_extension consults the env
 
-        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
-
-        dummy_builder = CppBuilder(
+        command_gen = CppBuilder(
             name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
         )
         # write function will calc source_code hash, the same source code with different
@@ -2068,17 +2067,25 @@ class CppCodeCache:
         # So we need get a command_line which contains isa related parameter as a part of hash key.
         # And then pass the command_line to below write function as extra parameter to
         # guarantee the source code hash contains ISA difference.
-        dummy_cmd = repr(dummy_builder.get_command_line())
-        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
+        vec_isa_cmd = repr(command_gen.get_command_line())
+        key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
+            output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
+
+            """
+            TODO: remove output_path hard code path, after optimize circle import issue.
+            _worker_compile_cpp will use 'CppBuilder' as arg, and CppBuilder can calc output
+            path according Windows/Linux OS.
+            """
             output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
-            worker_fn = functools.partial(
+            """
+             worker_fn = functools.partial(
                 _worker_compile_cpp,
                 lock_path,
                 input_path,
@@ -2086,6 +2093,16 @@ class CppCodeCache:
                 cpp_compile_command(
                     input=input_path, output=output_path, **compile_command
                 ),
+            )
+            """
+            worker_fn = functools.partial(
+                _worker_compile_cpp_new,
+                lock_path,
+                output_name,
+                input_path,
+                output_dir,
+                output_path,
+                compile_command,
             )
 
             def load_fn():
@@ -2111,6 +2128,33 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code: str, cuda: bool = False):
         return cls.load_async(source_code, cuda)()
+
+
+def _worker_compile_cpp_new(
+    lock_path, name, source, output_dir, output_path, args: dict[str, Any]
+):
+    from filelock import FileLock
+
+    cpp_build_option = CppTorchCudaOptions(**args)
+    cpp_builder = CppBuilder(
+        name=name,
+        sources=source,
+        output_dir=output_dir,
+        BuildOption=cpp_build_option,
+    )
+
+    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        if not os.path.exists(cpp_builder.get_target_file_path()):
+            if config.is_fbcode():
+                cmd = cpp_builder.get_command_line()
+                compile_file(source, output_path, shlex.split(cmd))
+            else:
+                cpp_builder.build()
+
+
+"""
+TODO: remove the below code, after new cpp_builder stable.
+"""
 
 
 def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
@@ -2594,7 +2638,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         command_gen = CppBuilder(
             name="O",
             sources="I",
-            BuildOption=CppOptions(compile_only=False),
+            BuildOption=CppOptions(),
         )
         command_line = command_gen.get_command_line()
         return sha256_hash(
