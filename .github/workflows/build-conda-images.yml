@@ -45,6 +45,7 @@ jobs:
         with:
           path: pytorch
       - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
             docker-image-name: ${{ inputs.docker-image }}
