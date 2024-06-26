@@ -295,6 +295,15 @@ class TestExport(TestCase):
         inp = (2, 1)
         self._test_export_same_as_eager(f, inp)
 
+    def test_no_tensor_computation_4(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return x
+
+        f = Module()
+        inp = ([torch.randn(3)], 1)
+        self._test_export_same_as_eager(f, inp)
+
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
             def add(self, x):
