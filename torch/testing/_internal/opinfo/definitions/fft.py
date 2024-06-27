@@ -10,7 +10,11 @@ import torch
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
-from torch.testing._internal.common_device_type import precisionOverride
+from torch.testing._internal.common_device_type import (
+    precisionOverride,
+    tol,
+    toleranceOverride,
+)
 from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
@@ -258,6 +262,12 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestSchemaCheckModeOpInfo",
                 "test_schema_correctness",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.complex32: tol(atol=1.3e-01, rtol=4e-02)}),
+                "TestCommon",
+                "test_complex_half_reference_testing",
+                device_type="cuda",
             ),
         ),
     ),
@@ -708,7 +718,25 @@ python_ref_db: List[OpInfo] = [
                 precisionOverride({torch.float: 2e-4}),
                 "TestFFT",
                 "test_reference_nd",
-            )
+            ),
+            # AssertionError: Reference result was farther (0.09746177145360499) from the precise
+            # computation than the torch result was (0.09111555632069855)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
+            # AssertionError: Reference result was farther (0.0953431016138116) from the precise
+            # computation than the torch result was (0.09305490684430734)
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_python_ref_executor",
+                dtypes=(torch.float16,),
+                device_type="cuda",
+            ),
         ],
     ),
     SpectralFuncPythonRefInfo(
