@@ -1083,25 +1083,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             )
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False, True])
-    def test_logsumexp_only_return(self, decoding):
-        make_kv = functools.partial(
+    def test_logsumexp_only_return(self):
+        make_tensor = functools.partial(
             torch.randn,
-            (B, Hkv if decoding else H, S, D),
+            (B, H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-
-        make_q = functools.partial(
-            torch.randn,
-            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-
-        q, k, v = make_q(), make_kv(), make_kv()
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
 
         @torch.compile
         def func(q, k, v, score_mod):
@@ -1111,27 +1101,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 3 if decoding else 2, True).run(code[0])
+        FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
-    @common_utils.parametrize("decoding", [False, True])
-    def test_logsumexp_is_not_fused(self, decoding):
-        make_kv = functools.partial(
+    def test_logsumexp_is_not_fused(self):
+        make_tensor = functools.partial(
             torch.randn,
-            (B, Hkv if decoding else H, S, D),
+            (B, H, S, D),
             dtype=torch.float32,
             device="cuda",
             requires_grad=True,
         )
-        make_q = functools.partial(
-            torch.randn,
-            (B, Hkv if decoding else H, Hq // Hkv if decoding else S, D),
-            dtype=torch.float32,
-            device="cuda",
-            requires_grad=True,
-        )
-
-        q, k, v = make_q(), make_kv(), make_kv()
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
 
         @torch.compile
         def func(q, k, v, score_mod):
@@ -1141,7 +1122,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         _, code = run_and_get_code(func, q, k, v, _identity)
         # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 3 if decoding else 2, True).run(code[0])
+        FileCheck().check_count(".run(", 2, True).run(code[0])
 
     @supported_platform
     @common_utils.parametrize(
