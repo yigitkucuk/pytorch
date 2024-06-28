@@ -113,7 +113,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         xs_inner = []
         for x in xs:
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(get_plain_tensors(x))
+                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
             else:
                 xs_inner.append(x)
         return xs_inner
