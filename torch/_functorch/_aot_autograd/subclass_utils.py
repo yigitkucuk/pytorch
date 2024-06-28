@@ -5,6 +5,7 @@ AOTAutograd's responsibility is to trace through all pytorch capabilities that l
 and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
+import typing
 from typing import Any, List, Optional, Tuple, Union
 
 import torch.utils._pytree as pytree
@@ -54,8 +55,8 @@ def create_subclass_metadata(a, start_idx):
             arg_count=new_start_idx - start_idx,
             attrs=attrs,
             meta=metadata,
-            outer_size=a.size(),
-            outer_stride=a.stride(),
+            outer_size=a.size(),  # type: ignore[attr-defined]
+            outer_stride=a.stride(),  # type: ignore[arg-type]
             original_subclass=a,
         ),
         new_start_idx,
@@ -83,7 +84,8 @@ def create_subclass_meta(
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
-        if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
+        if is_traceable_wrapper_subclass(a):
+            a = typing.cast(Tensor, a)
             start_idx = idx
             subclass_meta, _ = create_subclass_metadata(a, start_idx)
             infos.append(subclass_meta)
