@@ -17,7 +17,7 @@ import sys
 import sysconfig
 import warnings
 from pathlib import Path
-from typing import List, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
@@ -933,7 +933,7 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     ):
         os.environ["CUDA_HOME"] = build_paths.cuda()
     """
-    from torch._inductor.codecache import _set_gpu_runtime_env, cpp_prefix_path
+    from torch._inductor.codecache import cpp_prefix_path
 
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
@@ -1247,7 +1247,11 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
-    def build(self) -> Tuple[int, str]:
+    def build(
+        self,
+        fb_input_path: Optional[str] = None,
+        fb_output_path: Optional[str] = None,
+    ) -> str:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1259,8 +1263,14 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
+        if config.is_fbcode():
+            from torch._inductor.codecache import compile_file
 
-        status = run_command_line(build_cmd, cwd=_build_tmp_dir)
+            # compile_file(input_path, output_path, shlex.split(cmd))
+
+            compile_file(fb_input_path, fb_output_path, shlex.split(build_cmd))
+        else:
+            status = run_command_line(build_cmd, cwd=_build_tmp_dir)
 
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
+        return self._target_file

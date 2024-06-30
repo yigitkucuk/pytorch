@@ -2081,7 +2081,7 @@ class CppCodeCache:
             _worker_compile_cpp will use 'CppBuilder' as arg, and CppBuilder can calc output
             path according Windows/Linux OS.
             """
-            # output_path = input_path[:-3] + "so"
+            fb_output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
             """
@@ -2107,6 +2107,14 @@ class CppCodeCache:
                 _worker_compile_cpp_new,
                 lock_path,
                 cpp_builder,
+                input_path,
+                fb_output_path,
+            )
+
+            binary_path = (
+                fb_output_path
+                if config.is_fbcode()
+                else cpp_builder.get_target_file_path()
             )
 
             def load_fn():
@@ -2116,13 +2124,13 @@ class CppCodeCache:
                         future.result()
                     result = worker_fn()
                     assert result is None
-                    lib = cls._load_library(cpp_builder.get_target_file_path(), key)
+                    lib = cls._load_library(binary_path, key)
                     assert lib is not None
                 return lib
 
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(cpp_builder.get_target_file_path()):
+                    if not os.path.exists(binary_path):
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -2134,13 +2142,21 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp_new(lock_path, cpp_builder: CppBuilder):
+def _worker_compile_cpp_new(
+    lock_path,
+    cpp_builder: CppBuilder,
+    fb_input_path: str,
+    fb_output_path: str,
+):
     from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if not os.path.exists(cpp_builder.get_target_file_path()):
+        binary_path = (
+            fb_output_path if config.is_fbcode() else cpp_builder.get_target_file_path()
+        )
+        if not os.path.exists(binary_path):
             # compile_file(input_path, output_path, shlex.split(cmd))
-            cpp_builder.build()
+            cpp_builder.build(fb_input_path, fb_output_path)
 
 
 """
