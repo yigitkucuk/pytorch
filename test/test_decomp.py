@@ -31,7 +31,6 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
