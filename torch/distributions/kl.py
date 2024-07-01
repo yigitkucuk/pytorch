@@ -691,7 +691,18 @@ def _kl_gamma_gumbel(p, q):
     return t1 + t2 + t3
 
 
-# TODO: Add Gamma-Laplace KL Divergence
+@register_kl(Gamma, Laplace)
+def _kl_gamma_laplace(p, q):
+    alpha_p = p.concentration
+    beta_p = p.rate
+    mu_q = q.loc
+    b_q = q.scale
+    term1 = torch.lgamma(alpha_p) - alpha_p * torch.log(beta_p)
+    term2 = alpha_p * (1 + (mu_q / b_q).abs() + (beta_p * b_q).log())
+    term3 = - (alpha_p + 1) * torch.digamma(alpha_p)
+    term4 = beta_p * b_q * torch.exp(-mu_q.abs() / b_q)
+    kl_div = term1 + term2 + term3 + term4 - alpha_p
+    return kl_div
 
 
 @register_kl(Gamma, Normal)
